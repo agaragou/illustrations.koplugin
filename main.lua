@@ -23,7 +23,7 @@ function Illustrations:init()
     Dispatcher:registerAction("show_chapter_illustrations", {
         category = "none",
         event = "ShowChapterIllustrations",
-        title = _("Show illustrations to chapter end (Spoiler-free)"),
+        title = _("Show illustrations up to current page (Spoiler-free)"),
         general = true,
     })
 end
@@ -33,7 +33,7 @@ function Illustrations:onShowAllIllustrations()
 end
 
 function Illustrations:onShowChapterIllustrations()
-    self:showPreviewChapterIllustrations()
+    self:showPreviewCurrentPageIllustrations()
 end
 
 function Illustrations:addToMainMenu(menu_items)
@@ -59,8 +59,8 @@ function Illustrations:addToMainMenu(menu_items)
                 callback = function() self:showPreviewIllustrations() end,
             },
             {
-                text = _("Show illustrations to chapter end (Spoiler-free)"),
-                callback = function() self:showPreviewChapterIllustrations() end,
+                text = _("Show illustrations up to current page (Spoiler-free)"),
+                callback = function() self:showPreviewCurrentPageIllustrations() end,
             },
         }
     }
@@ -75,7 +75,7 @@ function Illustrations:showPreviewIllustrations(max_page)
     self:findAndDisplayImages(1, scan_end, "Preview Illustrations", max_page)
 end
 
-function Illustrations:showPreviewChapterIllustrations()
+function Illustrations:showPreviewCurrentPageIllustrations()
     local doc = self.ui.document
     if not doc then return end
     
@@ -84,34 +84,16 @@ function Illustrations:showPreviewChapterIllustrations()
         current_page = self.ui.view.current_page
     end
     
-    local toc = doc:getToc()
-    local end_page = doc:getPageCount()
-
-    -- Find current chapter end
-    if toc and current_page then
-        -- Flatten TOC for easier search
-        local function flatten(items, list)
-            for _, item in ipairs(items) do
-                table.insert(list, item)
-                if item.children then
-                    flatten(item.children, list)
-                end
-            end
-        end
-        local flat_toc = {}
-        flatten(toc, flat_toc)
-        
-        for i, item in ipairs(flat_toc) do
-            if item.page and item.page > current_page then
-                -- This chapter starts after our current page, so the previous chapter ends at item.page - 1
-                end_page = item.page - 1
-                break
-            end
-        end
+    if not current_page then
+        local InfoMessage = require("ui/widget/infomessage")
+        require("ui/uimanager"):show(InfoMessage:new{
+            text = _("Cannot determine current page."),
+        })
+        return
     end
     
-    -- Show preview up to this page
-    self:showPreviewIllustrations(end_page)
+    -- Show preview up to current page
+    self:showPreviewIllustrations(current_page)
 end
 
 function Illustrations:getCachePaths()
