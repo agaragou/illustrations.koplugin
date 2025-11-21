@@ -2,47 +2,64 @@
 
 A plugin for [KOReader](https://github.com/koreader/koreader) that allows you to browse, preview, and navigate through all illustrations contained in an EPUB book.
 
+![Gallery View](screenshots/gallery.jpeg)
+
+<details>
+<summary><b>More Screenshots (Menu, Settings, Actions)</b></summary>
+
+| **Plugin Menu** | **Settings** |
+| :---: | :---: |
+| ![Plugin Menu](screenshots/illustrations-menu.png) | ![Settings](screenshots/settings.png) |
+
+| **Main Menu Entry** | **Gesture Actions** |
+| :---: | :---: |
+| ![Main Menu](screenshots/illustrations-main-menu.png) | ![Actions](screenshots/actions.png) |
+
+</details>
+
 ## Features
 
-*   **Gallery View:** Browse all extracted images in a fullscreen slideshow/gallery mode.
-*   **Spoiler-Free Mode:** View illustrations **only up to the current page**, preventing accidental spoilers from future chapters or pages.
+*   **Gallery Mode:** Browse all extracted images in a 3x3 grid view.
+*   **Illustrations Mode:** View images one by one in full screen.
+*   **Spoiler Protection:** By default, shows images **only up to the current page**. You can toggle "Allow Spoilers" in settings to see everything.
 *   **Navigation:**
-    *   **Touch:** Tap left/right to navigate, tap center to open menu.
+    *   **Touch:** Tap left/right to navigate, tap **top-center** to open controls.
     *   **Keys:** Supports physical page turn buttons and directional keys.
-*   **Go to Page:** Jump directly from an image in the gallery to its location in the book.
-*   **Gesture Support:** Register actions in KOReader's Gesture Manager to trigger the gallery (e.g., via corner taps or swipes).
-*   **Efficient Caching:** Images are extracted once and stored in the cache, with options to manage/clear storage.
+*   **Go to Page:** Jump directly from an image to its location in the book.
+*   **Gesture Support:** Assign "Show Gallery" or "Show Illustrations" to any gesture in KOReader.
+*   **Efficient Caching:** Images are extracted once and stored in the cache.
 
 ## Installation
 
-1.  Download the `illustrations.koplugin` folder.
+1.  Download the latest release ZIP file from the [Releases page](../../releases).
 2.  Connect your device to your computer via USB.
-3.  Copy the folder into the `koreader/plugins/` directory on your device.
+3.  Unzip the archive and copy the `illustrations.koplugin` folder into the `koreader/plugins/` directory on your device.
 4.  Safely eject the device and restart KOReader.
 
 ## Usage
 
 ### Menu
-Open a book, tap the top menu, and go to the **Tools** (wrench icon) tab. You will see a new **Illustrations** menu with the following options:
+Open a book, tap the top menu, and go to the **Tools** (wrench icon) tab. You will see a new **Illustrations** menu:
 
-*   **Clear current book cache:** Removes extracted images for the currently open book.
-*   **Clear ALL books cache:** Removes all extracted images for all books to free up space.
-*   **Show All illustrations (SPOILERS!):** Opens the gallery with **all** images found in the book.
-*   **Show illustrations up to current page (Spoiler-free):** Opens the gallery containing only images from the beginning of the book up to the **current page**.
+*   **Settings:**
+    *   **Clear current book cache:** Removes extracted images for the current book.
+    *   **Clear ALL books cache:** Removes all extracted images to free up space.
+    *   **Allow Spoilers:** Toggle to show ALL images in the book (default is OFF).
+*   **Show Illustrations:** Opens the single-image viewer.
+*   **Show Gallery:** Opens the grid view of thumbnails.
 
-### Gallery Controls
-*   **Next Image:** Tap right side of screen / Right Key / Page Forward.
-*   **Previous Image:** Tap left side of screen / Left Key / Page Back.
-*   **Menu / Controls:** Tap center of screen / Menu Key.
-    *   **Go to Page:** Closes gallery and jumps to the book page containing the image.
-    *   **Resume Gallery:** Returns to viewing.
-    *   **Close Gallery:** Exits the plugin.
+### Controls (Single View)
+*   **Next/Prev:** Tap right/left side or use keys.
+*   **Menu:** Tap **top-center**.
+    *   **Go to Page:** Jump to the book page.
+    *   **Gallery:** Switch to grid view.
+    *   **Resume:** Continue viewing.
+    *   **Exit:** Close plugin.
 
 ### Gestures
-You can assign the plugin actions to gestures (e.g., "Tap top-right corner") via **Settings -> Taps & Gestures -> Gesture Manager**.
-Look for the actions in the **General** or **Tools** tab:
-*   `Show All illustrations (SPOILERS!)`
-*   `Show illustrations up to current page (Spoiler-free)`
+You can assign actions in **Settings -> Taps & Gestures -> Gesture Manager**:
+*   `Illustrations: Show Gallery`
+*   `Illustrations: Show Illustrations`
 
 ## Storage
-Extracted images are stored in `koreader/cache/illustrations/`. You can manage this space using the built-in menu options.
+Extracted images are stored in `koreader/cache/illustrations/`.

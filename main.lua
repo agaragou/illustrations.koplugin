@@ -10,44 +10,68 @@ local Illustrations = WidgetContainer:extend{
 }
 
 function Illustrations:init()
-    logger.info("Illustrations: init() called, registering actions")
     self.ui.menu:registerToMainMenu(self)
     
-    Dispatcher:registerAction("show_all_illustrations", {
+    Dispatcher:registerAction("show_gallery_mode", {
         category = "none",
-        event = "ShowAllIllustrations",
-        title = _("Show All illustrations (SPOILERS!)"),
+        event = "ShowGalleryMode",
+        title = _("Illustrations: Show Gallery"),
         general = true,
     })
     
-    Dispatcher:registerAction("show_chapter_illustrations", {
+    Dispatcher:registerAction("show_illustrations_mode", {
         category = "none",
-        event = "ShowChapterIllustrations",
-        title = _("Show illustrations up to current page (Spoiler-free)"),
+        event = "ShowIllustrationsMode",
+        title = _("Illustrations: Show Illustrations"),
         general = true,
     })
 end
 
-function Illustrations:onShowAllIllustrations()
-    self:showPreviewIllustrations()
+function Illustrations:onShowGalleryMode()
+    self:showGalleryMode()
 end
 
-function Illustrations:onShowChapterIllustrations()
-    self:showPreviewCurrentPageIllustrations()
+function Illustrations:onShowIllustrationsMode()
+    self:showIllustrationsMode()
 end
 
 function Illustrations:addToMainMenu(menu_items)
+    if not self.ui.document then return end
     menu_items.illustrations = {
         text = _("Illustrations"),
         sorting_hint = "tools",
         sub_item_table = {
             {
-                text = _("Clear current book cache"),
-                callback = function() self:clearBookCache() end,
-            },
-            {
-                text = _("Clear ALL books cache"),
-                callback = function() self:clearAllCache() end,
+                text = _("Settings"),
+                sub_item_table = {
+                    {
+                        text = _("Clear current book cache"),
+                        callback = function()
+                            self:clearBookCache()
+                        end,
+                    },
+                    {
+                        text = _("Clear ALL books cache"),
+                        callback = function()
+                            self:clearAllCache()
+                        end,
+                    },
+                    {
+                        text = "----------------",
+                        enabled = false, -- Visual separator
+                        callback = function() end,
+                    },
+                    {
+                        text = _("Allow Spoilers"),
+                        checked_func = function()
+                            return G_reader_settings:readSetting("illustrations_allow_spoilers")
+                        end,
+                        callback = function()
+                            local current = G_reader_settings:readSetting("illustrations_allow_spoilers")
+                            G_reader_settings:saveSetting("illustrations_allow_spoilers", not current)
+                        end,
+                    },
+                }
             },
             {
                 text = "----------------",
@@ -55,46 +79,30 @@ function Illustrations:addToMainMenu(menu_items)
                 callback = function() end,
             },
             {
-                text = _("Show All illustrations (SPOILERS!)"),
-                callback = function() self:showPreviewIllustrations() end,
+                text = _("Show Illustrations"),
+                callback = function()
+                    self:showIllustrationsMode()
+                end,
             },
             {
-                text = _("Show illustrations up to current page (Spoiler-free)"),
-                callback = function() self:showPreviewCurrentPageIllustrations() end,
+                text = _("Show Gallery"),
+                callback = function()
+                    self:showGalleryMode()
+                end,
             },
         }
     }
 end
 
-function Illustrations:showPreviewIllustrations(max_page)
-    local doc = self.ui.document
-    if not doc then return end
-    
-    local scan_end = max_page or doc:getPageCount()
-    
-    self:findAndDisplayImages(1, scan_end, "Preview Illustrations", max_page)
+function Illustrations:showGalleryMode()
+    self:findAndDisplayImages(true)
 end
 
-function Illustrations:showPreviewCurrentPageIllustrations()
-    local doc = self.ui.document
-    if not doc then return end
-    
-    local current_page = self.ui:getCurrentPage()
-    if not current_page and self.ui.view then
-        current_page = self.ui.view.current_page
-    end
-    
-    if not current_page then
-        local InfoMessage = require("ui/widget/infomessage")
-        require("ui/uimanager"):show(InfoMessage:new{
-            text = _("Cannot determine current page."),
-        })
-        return
-    end
-    
-    -- Show preview up to current page
-    self:showPreviewIllustrations(current_page)
+function Illustrations:showIllustrationsMode()
+    self:findAndDisplayImages(false)
 end
+
+
 
 function Illustrations:getCachePaths()
     local DataStorage = require("datastorage")
@@ -199,69 +207,90 @@ end
 
 
 
-function Illustrations:findAndDisplayImages(start_page, end_page, title, max_page)
-    local all_images = {}
-    
-    local InfoMessage = require("ui/widget/infomessage")
-    local loading = InfoMessage:new{
-        text = _("Scanning for images...\n0%"),
-    }
-    UIManager:show(loading)
-    UIManager:forceRePaint()
+    function Illustrations:findAndDisplayImages(is_gallery_mode)
+        local doc = self.ui.document
+        local UIManager = require("ui/uimanager")
+        local InfoMessage = require("ui/widget/infomessage")
+        local logger = require("logger")
 
-    -- Async scanning using coroutine
-    local co = coroutine.create(function()
-        local total_pages = end_page - start_page + 1
-        local processed = 0
+        local current_page = self.ui:getCurrentPage()
         
-        for page = start_page, end_page do
-            local page_images = self:getImagesFromPage(page)
-            for _, img in ipairs(page_images) do
-                table.insert(all_images, img)
-            end
-            
-            processed = processed + 1
-            
-            -- Yield every 10 pages to keep UI responsive
-            if processed % 10 == 0 then
-                coroutine.yield()
-            end
+        local allow_spoilers = G_reader_settings:readSetting("illustrations_allow_spoilers")
+        local max_page = nil
+        
+        if not allow_spoilers then
+            max_page = current_page
         end
-        
-        -- Schedule UI update on main thread to avoid freeze
-        UIManager:scheduleIn(0, function()
-            UIManager:close(loading)
 
-            if #all_images == 0 then
-                UIManager:show(InfoMessage:new{
-                    text = _("No illustrations found."),
-                })
-            else
-                self:displayImages(all_images, title, max_page)
+        local illustrations_root, output_dir = self:getCachePaths()
+        if not output_dir then return end
+
+        -- Show info message
+        local loading = InfoMessage:new{
+            text = "Scanning book for images...",
+        }
+        UIManager:show(loading)
+        UIManager:forceRePaint()
+
+        -- Async scanning using coroutine
+        local co = coroutine.create(function()
+            local all_images = {}
+            local processed = 0
+
+            local total_pages = doc:getPageCount()
+            
+            for page = 1, total_pages do
+                -- Optimization: If we are in spoiler-free mode, we CAN stop scanning after max_page
+                if max_page and page > max_page then
+                    break
+                end
+                
+                local page_images = self:getImagesFromPage(page)
+                if page_images then
+                    for _, img in ipairs(page_images) do
+                        table.insert(all_images, img)
+                    end
+                end
+                
+                processed = processed + 1
+                if processed % 10 == 0 then
+                    coroutine.yield()
+                end
             end
-        end)
-    end)
-
-    -- Scheduler to resume coroutine
-    local function resume()
-        if coroutine.status(co) ~= "dead" then
-            local ok, err = coroutine.resume(co)
-            if not ok then
-                logger.warn("Illustrations: Error in scanning coroutine: " .. tostring(err))
+            
+            -- Schedule UI update
+            UIManager:scheduleIn(0, function()
                 UIManager:close(loading)
-            else
-                -- Schedule next chunk
-                UIManager:scheduleIn(0.01, resume)
+
+                if #all_images == 0 then
+                    UIManager:show(InfoMessage:new{
+                        text = "No images found.",
+                        timeout = 2,
+                    })
+                else
+                    self:displayImages(all_images, is_gallery_mode, max_page)
+                end
+            end)
+        end)
+
+        -- Scheduler to resume coroutine
+        local function resume()
+            if coroutine.status(co) ~= "dead" then
+                local ok, err = coroutine.resume(co)
+                if not ok then
+                    logger.warn("Illustrations: Error in scanning coroutine: " .. tostring(err))
+                    UIManager:close(loading)
+                else
+                    UIManager:scheduleIn(0.01, resume)
+                end
             end
         end
+
+        resume()
     end
 
-    resume()
-end
-
-function Illustrations:displayImages(images, title, max_page)
+function Illustrations:displayImages(images, is_gallery_mode, max_page)
     -- Grid View (Gallery)
-    logger.info("Illustrations: Starting Gallery View")
     local UIManager = require("ui/uimanager")
     local WidgetContainer = require("ui/widget/container/widgetcontainer")
     local ImageWidget = require("ui/widget/imagewidget")
@@ -433,7 +462,7 @@ function Illustrations:displayImages(images, title, max_page)
                 self.ges_events.TapMenu = {
                     GestureRange:new{
                         ges = "tap",
-                        range = Geom:new{ x = self.width * 0.3, y = 0, w = self.width * 0.4, h = self.height },
+                        range = Geom:new{ x = self.width * 0.3, y = 0, w = self.width * 0.4, h = self.height * 0.33 },
                         func = function() self:showControls() end,
                     }
                 }
@@ -531,19 +560,28 @@ function Illustrations:displayImages(images, title, max_page)
                             end,
                         },
                         {
-                            text = "Resume Gallery",
+                            text = "Open Gallery",
                             callback = function()
                                 UIManager:close(dialog)
-                                -- Re-open gallery at current index
-                                if self.callback_resume then self.callback_resume(self.index) end
+                                if self.callback_thumbnails then self.callback_thumbnails() end
                             end,
                         },
+                    },
+                    {
                         {
-                            text = "Close Gallery",
+                            text = "Exit",
                             callback = function()
                                 UIManager:close(dialog)
                                 -- Already closed, but safe to call again
                                 if self.callback_close then self.callback_close(true) end
+                            end,
+                        },
+                        {
+                            text = "Resume",
+                            callback = function()
+                                UIManager:close(dialog)
+                                -- Re-open gallery at current index
+                                if self.callback_resume then self.callback_resume(self.index) end
                             end,
                         }
                     }
@@ -604,16 +642,276 @@ function Illustrations:displayImages(images, title, max_page)
                                 UIManager:setDirty(nil, "full")
                             end
                         end,
+                        callback_thumbnails = function()
+                            -- Close gallery is handled by the button callback in GalleryWindow
+                            -- We just need to show thumbnails again
+                            self:showGalleryMode()
+                        end,
                     }
                     
                     self.grid_window = gallery
                     UIManager:show(gallery)
                 end)
             end
-        end
+    end
 
-        -- Start with the first image
-        showGalleryImage(1)
+    -- Thumbnail Window Class
+    local ThumbnailWindow = InputContainer:extend{
+        modal = true,
+        fullscreen = true,
+        width = nil,
+        height = nil,
+        images = nil,
+        callback_open = nil,
+        callback_close = nil,
+    }
+
+    function ThumbnailWindow:init()
+        InputContainer._init(self)
+        
+        self.width = Screen:getWidth()
+        self.height = Screen:getHeight()
+        self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
+        
+        local ScrollableContainer = require("ui/widget/container/scrollablecontainer")
+        local VerticalGroup = require("ui/widget/verticalgroup")
+        local HorizontalGroup = require("ui/widget/horizontalgroup")
+        local FrameContainer = require("ui/widget/container/framecontainer")
+        local CenterContainer = require("ui/widget/container/centercontainer")
+        local Button = require("ui/widget/button")
+        local TitleBar = require("ui/widget/titlebar")
+        
+        -- Grid Layout Calculation
+        local cols = 3
+        local padding = 10
+        local item_width = math.floor((self.width - (cols + 1) * padding) / cols)
+        -- Aspect ratio 3:4 for book covers/pages usually works well, or 1:1
+        -- Let's use 3:4 ratio for thumbnails
+        local item_height = math.floor(item_width * 4 / 3) 
+        
+        local v_group = VerticalGroup:new{
+            align = "left",
+        }
+        
+        -- Add Title Bar
+        local title_bar = TitleBar:new{
+            width = self.width,
+            title = self.title or "Gallery",
+            show_parent = self,
+            close_callback = function() self:onClose() end,
+        }
+        table.insert(v_group, title_bar)
+        
+        -- Grid Content
+        local grid_v_group = VerticalGroup:new{
+            align = "left",
+            padding = padding,
+            gap = padding,
+        }
+        
+        local current_row = nil
+        
+        for i, img in ipairs(self.images) do
+            if (i - 1) % cols == 0 then
+                current_row = HorizontalGroup:new{
+                    align = "top",
+                    gap = padding,
+                }
+                table.insert(grid_v_group, current_row)
+            end
+            
+            -- Thumbnail Image
+            local image_widget = ImageWidget:new{
+                file = img.path,
+                width = item_width,
+                height = item_height,
+                scale_factor = 0, -- Fit to box
+                file_do_cache = false, -- Disable cache
+            }
+            
+            -- Frame for border/padding
+            local thumb_frame = FrameContainer:new{
+                bordersize = 1,
+                padding = 0,
+                dimen = Geom:new{w = item_width, h = item_height},
+                CenterContainer:new{
+                    dimen = Geom:new{w = item_width, h = item_height},
+                    image_widget
+                }
+            }
+            
+            table.insert(current_row, thumb_frame)
+        end
+        
+        -- Scrollable Area
+        local scroll_height = self.height - title_bar:getHeight()
+        local scroll_container = ScrollableContainer:new{
+            dimen = Geom:new{w = self.width, h = scroll_height},
+            show_parent = self, -- Critical for repaint!
+            grid_v_group,
+        }
+
+        table.insert(v_group, scroll_container)
+        
+        self[1] = FrameContainer:new{
+            dimen = self.dimen,
+            padding = 0,
+            bordersize = 0,
+            background = Blitbuffer.COLOR_WHITE,
+            v_group
+        }
+        
+        -- Set cropping widget for ScrollableContainer to work correctly with UIManager
+        self.cropping_widget = scroll_container
+        
+        -- Register events on the main window using registerTouchZones
+        self:registerTouchZones({
+            {
+                id = "thumb_tap",
+                ges = "tap",
+                screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
+                handler = function(ges)
+                    -- Calculate which item was clicked
+                    local x = ges.pos.x
+                    local y = ges.pos.y - title_bar:getHeight() -- Adjust for title bar
+                    
+                    -- Add scroll offset
+                    local scroll_off = scroll_container:getScrolledOffset()
+                    
+                    local real_y = y + scroll_off.y
+                    local real_x = x + scroll_off.x
+                    
+                    -- Grid calculations
+                    -- We have padding around the grid and between items
+                    -- grid_v_group has padding
+                    
+                    -- Effective coordinates inside the grid content
+                    local content_x = real_x - padding
+                    local content_y = real_y - padding
+                    
+                    if content_x < 0 or content_y < 0 then return end
+                    
+                    local col = math.floor(content_x / (item_width + padding))
+                    local row = math.floor(content_y / (item_height + padding))
+                    
+                    -- Check if we are inside the item (accounting for gap)
+                    local in_col_x = content_x % (item_width + padding)
+                    local in_row_y = content_y % (item_height + padding)
+                    
+                    if in_col_x > item_width or in_row_y > item_height then
+                        return -- Clicked in the gap
+                    end
+                    
+                    if col >= 0 and col < cols then
+                        local index = (row * cols) + col + 1
+                        if index <= #self.images then
+                            self:onClose()
+                            if self.callback_open then self.callback_open(index) end
+                        end
+                    end
+                    return true
+                end
+            },
+            {
+                id = "thumb_swipe",
+                ges = "swipe",
+                screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
+                handler = function(ges)
+                    local res = scroll_container:handleEvent(ges)
+                    if res then UIManager:setDirty(self, "ui") end
+                    return res
+                end
+            },
+            {
+                id = "thumb_pan",
+                ges = "pan",
+                screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
+                handler = function(ges)
+                    local res = scroll_container:handleEvent(ges)
+                    if res then UIManager:setDirty(self, "ui") end
+                    return res
+                end
+            },
+            {
+                id = "thumb_pan_release",
+                ges = "pan_release",
+                screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
+                handler = function(ges)
+                    local res = scroll_container:handleEvent(ges)
+                    if res then UIManager:setDirty(self, "ui") end
+                    return res
+                end
+            },
+            {
+                id = "thumb_hold_pan",
+                ges = "hold_pan",
+                screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
+                handler = function(ges)
+                    local res = scroll_container:handleEvent(ges)
+                    if res then UIManager:setDirty(self, "ui") end
+                    return res
+                end
+            },
+            {
+                id = "thumb_hold_release",
+                ges = "hold_release",
+                screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
+                handler = function(ges)
+                    local res = scroll_container:handleEvent(ges)
+                    if res then UIManager:setDirty(self, "ui") end
+                    return res
+                end
+            },
+        })
+    end
+    
+    function ThumbnailWindow:onClose()
+        if self.callback_close then self.callback_close() end
+        UIManager:close(self)
+        return true
+    end
+    
+    -- Key events for closing
+    function ThumbnailWindow:onCloseKey() return self:onClose() end
+    ThumbnailWindow.key_events = {
+        Close = { { "Back" }, { "Esc" }, { "Menu" } },
+    }
+
+    -- Logic to choose view mode
+    if #extracted_images == 0 then
+        UIManager:show(InfoMessage:new{
+            text = "No images found.",
+            timeout = 2,
+        })
+        return
+    end
+
+    if is_gallery_mode then
+        -- Show Gallery (Grid) View
+        UIManager:nextTick(function()
+            local thumbs = ThumbnailWindow:new{
+                images = extracted_images,
+                title = "Gallery", -- Renamed from Thumbnails
+                callback_open = function(index)
+                    -- Open single image view
+                    showGalleryImage(index)
+                end,
+            }
+            UIManager:show(thumbs)
+        end)
+    else
+        -- Show Single Image View (Illustrations)
+        -- Start from the first image (or maybe the one closest to current page? 
+        -- For now, first image is fine, or we could find the last one <= current page)
+        
+        local start_index = 1
+        -- Try to find the image closest to current page (but not after, if possible)
+        if not allow_spoilers then
+            start_index = #extracted_images -- Show the last one found (closest to current page)
+        end
+        
+        showGalleryImage(start_index)
+    end
     end
 
 return Illustrations
