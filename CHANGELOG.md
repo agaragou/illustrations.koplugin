@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4] - 2025-12-09
+
+### Added
+- **Favorites System**: You can now add images to your "Favorites".
+- **Favorites Gallery**: A new global gallery to view your favorite illustrations from all books. Available from the plugin menu or globally via a gesture.
+- **Update Checker**: Automatically checks for new versions on GitHub and notifies you when an update is available.
+- **Settings Enhancements**:
+    - Toggle for "Check for updates".
+    - Option to "Clear Favorites".
+    - "Minimum Image Size" setting to filter out small icons/artifacts.
+
+### Changed
+- **Context Awareness**: "Show Gallery" and "Show Illustrations" actions are now strictly available only when a document is open. "Show Favorites" is available everywhere (including file browser).
+- **Update Notifications**: Improved notification clarity (shows "Remote" vs "Local" version) and identifying plugin name.
+- **Performance**: Improved network checks to prevent crashes if offline.
+
 ## [0.3] - 2025-11-21
 
 ### Added
