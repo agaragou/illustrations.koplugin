@@ -3,6 +3,8 @@ local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
 local NetworkMgr = require("ui/network/manager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local JSON = require("json")
+local GestureRange = require("ui/gesturerange")
 local _ = require("gettext")
 local logger = require("logger")
 local Device = require("device")
@@ -265,205 +267,222 @@ end
 
 -- Thumbnail Window Class
 local ThumbnailWindow = InputContainer:extend{
-    modal = true,
-    fullscreen = true,
-    width = nil,
-    height = nil,
-    images = nil,
-    callback_open = nil,
-    callback_close = nil,
-    title = "Gallery",
+    name = "ThumbnailWindow",
+    page_size = 9,
 }
 
 function ThumbnailWindow:init()
-    InputContainer._init(self)
+    self.images = self.images or {}
+    self.title = self.title or _("Gallery")
     
+    -- Pagination State
+    self.current_page = 1
+    self.total_pages = math.ceil(#self.images / self.page_size)
+    if self.total_pages < 1 then self.total_pages = 1 end
+    
+    -- Main Layout
     self.width = Screen:getWidth()
     self.height = Screen:getHeight()
     self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
     
-    -- Grid Layout Calculation
-    local cols = 3
-    local padding = 10
-    local item_width = math.floor((self.width - (cols + 1) * padding) / cols)
-    -- Aspect ratio 3:4 for book covers/pages usually works well, or 1:1
-    -- Let's use 3:4 ratio for thumbnails
-    local item_height = math.floor(item_width * 4 / 3) 
-    
-    local v_group = VerticalGroup:new{
-        align = "left",
-    }
-    
-    -- Add Title Bar
+    -- 1. Title Bar
     local title_bar = TitleBar:new{
         width = self.width,
         title = self.title,
         show_parent = self,
         close_callback = function() self:onClose() end,
     }
-    table.insert(v_group, title_bar)
     
-    -- Grid Content
-    local grid_v_group = VerticalGroup:new{
-        align = "left",
-        padding = padding,
-        gap = padding,
-    }
+    -- 2. Grid Container (Placeholder)
+    self.grid_v_group = VerticalGroup:new{ align = "left" }
     
-    local current_row = nil
+    -- Fixed Height for Scroll Area (80% of screen - SAFE)
+    local scroll_h = math.floor(self.height * 0.80)
     
-    for i, img in ipairs(self.images) do
-        if (i - 1) % cols == 0 then
-            current_row = HorizontalGroup:new{
-                align = "top",
-                gap = padding,
-            }
-            table.insert(grid_v_group, current_row)
-        end
-        
-        -- Thumbnail Image
-        local image_widget = ImageWidget:new{
-            file = img.path,
-            width = item_width,
-            height = item_height,
-            scale_factor = 0, -- Fit to box
-            file_do_cache = false, -- Disable cache
-        }
-        
-        -- Frame for border/padding
-        local thumb_frame = FrameContainer:new{
-            bordersize = 1,
-            padding = 0,
-            dimen = Geom:new{w = item_width, h = item_height},
-            CenterContainer:new{
-                dimen = Geom:new{w = item_width, h = item_height},
-                image_widget
-            }
-        }
-        
-        table.insert(current_row, thumb_frame)
-    end
-    
-    -- Scrollable Area
-    local scroll_height = self.height - title_bar:getHeight()
-    local scroll_container = ScrollableContainer:new{
-        dimen = Geom:new{w = self.width, h = scroll_height},
-        show_parent = self, -- Critical for repaint!
-        grid_v_group,
+    self.scroll_container = ScrollableContainer:new{
+        dimen = Geom:new{ x = 0, y = 0, w = self.width, h = scroll_h }, 
+        self.grid_v_group,
     }
 
-    table.insert(v_group, scroll_container)
+local LeftContainer = require("ui/widget/container/leftcontainer")
+local RightContainer = require("ui/widget/container/rightcontainer")
+-- thumbnail window init...
+
+    -- 3. Bottom Bar (Controls)
+    self.btn_prev = Button:new{
+        text = "  <  ",
+        callback = function() self:prevPage() end,
+        bordersize = 1,
+    }
+    self.btn_next = Button:new{
+        text = "  >  ",
+        callback = function() self:nextPage() end,
+        bordersize = 1,
+    }
+    self.lbl_page = TextBoxWidget:new{
+        text = "Page 1 / 1",
+        face = require("ui/font"):getFace("smallinfofont"),
+        alignment = "center", -- Explicitly center the text inside the widget
+        padding = 10,
+    }
     
+    local bottom_bar = HorizontalGroup:new{
+        align = "center",
+        padding = 15,
+        self.btn_prev,
+        self.lbl_page,
+        self.btn_next,
+    }
+    
+    -- 4. Root Group
+    local root_group = VerticalGroup:new{
+        align = "center",
+        title_bar,
+        self.scroll_container,
+        bottom_bar,
+    }
+
     self[1] = FrameContainer:new{
         dimen = self.dimen,
         padding = 0,
         bordersize = 0,
         background = Blitbuffer.COLOR_WHITE,
-        v_group
+        root_group
     }
     
-    -- Set cropping widget for ScrollableContainer to work correctly with UIManager
-    self.cropping_widget = scroll_container
+    self.cropping_widget = self.scroll_container
     
-    -- Register events on the main window using registerTouchZones
-    self:registerTouchZones({
-        {
-            id = "thumb_tap",
-            ges = "tap",
-            screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
-            handler = function(ges)
-                -- Calculate which item was clicked
-                local x = ges.pos.x
-                local y = ges.pos.y - title_bar:getHeight() -- Adjust for title bar
-                
-                -- Add scroll offset
-                local scroll_off = scroll_container:getScrolledOffset()
-                
-                local real_y = y + scroll_off.y
-                local real_x = x + scroll_off.x
-                
-                -- Grid calculations
-                -- We have padding around the grid and between items
-                -- grid_v_group has padding
-                
-                -- Effective coordinates inside the grid content
-                local content_x = real_x - padding
-                local content_y = real_y - padding
-                
-                if content_x < 0 or content_y < 0 then return end
-                
-                local col = math.floor(content_x / (item_width + padding))
-                local row = math.floor(content_y / (item_height + padding))
-                
-                -- Check if we are inside the item (accounting for gap)
-                local in_col_x = content_x % (item_width + padding)
-                local in_row_y = content_y % (item_height + padding)
-                
-                if in_col_x > item_width or in_row_y > item_height then
-                    return -- Clicked in the gap
-                end
-                
-                if col >= 0 and col < cols then
-                    local index = (row * cols) + col + 1
-                    if index <= #self.images then
-                        self:onClose()
-                        if self.callback_open then self.callback_open(index) end
-                    end
-                end
-                return true
-            end
-        },
-        {
-            id = "thumb_swipe",
-            ges = "swipe",
-            screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
-            handler = function(ges)
-                local res = scroll_container:handleEvent(ges)
-                if res then UIManager:setDirty(self, "ui") end
-                return res
-            end
-        },
-        {
-            id = "thumb_pan",
-            ges = "pan",
-            screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
-            handler = function(ges)
-                local res = scroll_container:handleEvent(ges)
-                if res then UIManager:setDirty(self, "ui") end
-                return res
-            end
-        },
-        {
-            id = "thumb_pan_release",
-            ges = "pan_release",
-            screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
-            handler = function(ges)
-                local res = scroll_container:handleEvent(ges)
-                if res then UIManager:setDirty(self, "ui") end
-                return res
-            end
-        },
-        {
-            id = "thumb_hold_pan",
-            ges = "hold_pan",
-            screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
-            handler = function(ges)
-                local res = scroll_container:handleEvent(ges)
-                if res then UIManager:setDirty(self, "ui") end
-                return res
-            end
-        },
-        {
-            id = "thumb_hold_release",
-            ges = "hold_release",
-            screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
-            handler = function(ges)
-                local res = scroll_container:handleEvent(ges)
-                if res then UIManager:setDirty(self, "ui") end
-                return res
-            end
-        },
-    })
+    -- Initial Population
+    self:refreshGrid()
+end
+
+function ThumbnailWindow:refreshGrid()
+    local start_idx = (self.current_page - 1) * self.page_size + 1
+    local end_idx = math.min(start_idx + self.page_size - 1, #self.images)
+    
+    local page_items = {}
+    for i = start_idx, end_idx do
+        table.insert(page_items, self.images[i])
+    end
+    
+    local rows = {}
+    local cols = 3
+    local row_items = {}
+    
+    -- Layout Metrics
+    local padding = 10
+    local item_w = math.floor((self.width - (cols + 1) * padding) / cols)
+    
+    -- Calculate height to fit 3 rows exactly in the 87% scroll area
+    -- Available height for grid = Screen * 0.87
+    -- We need to fit 3 rows + 4 paddings (top, mid, mid, bottom)
+    local scroll_area_h = math.floor(self.height * 0.87)
+    local max_h_per_row = math.floor((scroll_area_h - (3 + 1) * padding) / 3)
+    
+    -- Use the smaller of: Aspect Ratio Height (4/3) OR Max Fitting Height
+    local item_h = math.min(math.floor(item_w * 4 / 3), max_h_per_row) 
+    
+    for i, img_data in ipairs(page_items) do
+        local global_index = start_idx + i - 1
+        
+        -- 1. Create the ImageWidget (proven proper rendering)
+        local img_widget = ImageWidget:new{
+            file = img_data.path,
+            width = item_w,
+            height = item_h,
+            scale_factor = 0, 
+            file_do_cache = false,
+        }
+        
+        -- 2. Create the Button (proven proper touch handling)
+        -- We initialize it with empty text to act as a container shell
+        local btn = Button:new{
+            text = "",
+            width = item_w,
+            height = item_h,
+            padding = 0,
+            bordersize = 0,
+            frame_bordersize = 0,
+            callback = function()
+                self:onClose()
+                if self.callback_open then self.callback_open(global_index) end
+            end,
+        }
+        
+        -- IMPORTANT: Set text to nil so Button doesn't try to invert text color on click
+        -- (which would crash because we are replacing the text widget with an image)
+        btn.text = nil
+        
+        -- 3. TRANSPLANT: Replace Button's internal text widget with our ImageWidget
+        -- Button structure: self.frame -> self.label_container -> self.label_widget
+        if btn.label_container then
+             -- Free the default empty text widget
+             if btn.label_widget and btn.label_widget.free then
+                 btn.label_widget:free()
+             end
+             
+             -- Inject our image
+             btn.label_container[1] = img_widget
+             btn.label_widget = img_widget -- update reference
+        end
+        
+        table.insert(row_items, btn)
+        
+        if #row_items == cols then
+            table.insert(rows, HorizontalGroup:new{ gap = padding, table.unpack(row_items) })
+            row_items = {}
+        end
+    end
+    if #row_items > 0 then
+        table.insert(rows, HorizontalGroup:new{ gap = padding, table.unpack(row_items) })
+    end
+    
+    -- New Grid Group
+    self.grid_v_group = VerticalGroup:new{ 
+        align = "left", 
+        padding = padding, 
+        gap = padding,
+        table.unpack(rows) 
+    }
+    
+    -- Re-create ScrollableContainer (Stable way)
+    local scroll_h = math.floor(self.height * 0.87)
+    
+    local new_scroll = ScrollableContainer:new{
+        dimen = Geom:new{ x = 0, y = 0, w = self.width, h = scroll_h }, 
+        self.grid_v_group,
+    }
+    
+    -- Replace in Root Group
+    self.scroll_container = new_scroll
+    self.cropping_widget = new_scroll
+    self[1][1][2] = new_scroll
+    
+    -- Update Controls
+    self.lbl_page:setText(string.format("Page %d / %d", self.current_page, self.total_pages))
+    
+    if self.btn_prev.enableDisable then
+        self.btn_prev:enableDisable(self.current_page > 1)
+    end
+    if self.btn_next.enableDisable then
+        self.btn_next:enableDisable(self.current_page < self.total_pages)
+    end
+    
+    UIManager:setDirty(self, "full")
+end
+
+function ThumbnailWindow:prevPage()
+    if self.current_page > 1 then
+        self.current_page = self.current_page - 1
+        self:refreshGrid()
+    end
+end
+
+function ThumbnailWindow:nextPage()
+    if self.current_page < self.total_pages then
+        self.current_page = self.current_page + 1
+        self:refreshGrid()
+    end
 end
 
 function ThumbnailWindow:onClose()
@@ -476,7 +495,12 @@ end
 function ThumbnailWindow:onCloseKey() return self:onClose() end
 ThumbnailWindow.key_events = {
     Close = { { "Back" }, { "Esc" }, { "Menu" } },
+    PageBack = { { "Left" } },
+    PageFwd = { { "Right" } },
 }
+-- Map Left/Right keys to pagination
+function ThumbnailWindow:onPageBack() self:prevPage() return true end
+function ThumbnailWindow:onPageFwd() self:nextPage() return true end
 
 
 local Illustrations = WidgetContainer:extend{
@@ -485,17 +509,20 @@ local Illustrations = WidgetContainer:extend{
 
 function Illustrations:init()
     self.ui.menu:registerToMainMenu(self)
-    
+    self.scan_cache = {}
+
     Dispatcher:registerAction("show_gallery_mode", {
         category = "none",
         event = "ShowGalleryMode",
         title = _("Illustrations: Show Gallery"),
+        general = true,
     })
     
     Dispatcher:registerAction("show_illustrations_mode", {
         category = "none",
         event = "ShowIllustrationsMode",
         title = _("Illustrations: Show Illustrations"),
+        general = true,
     })
     
     Dispatcher:registerAction("show_favorites_gallery", {
@@ -798,6 +825,52 @@ function Illustrations:getCachePaths()
 end
 
 
+function Illustrations:getManifestPath()
+    local root, book_dir = self:getCachePaths()
+    if not book_dir then return nil end
+    return book_dir .. "cache_manifest.lua"
+end
+
+function Illustrations:saveManifest(data)
+    local path = self:getManifestPath()
+    if not path then return end
+    
+    local f = io.open(path, "w")
+    if not f then return end
+    
+    f:write("return {\n")
+    f:write(string.format("  version = %d,\n", data.version or 1))
+    f:write(string.format("  completed = %s,\n", tostring(data.completed)))
+    f:write("  images = {\n")
+    for _, img in ipairs(data.images) do
+        f:write("    {\n")
+        f:write(string.format("      path = %q,\n", img.path))
+        f:write(string.format("      page = %d,\n", img.page))
+        f:write(string.format("      valid = %s,\n", tostring(img.valid)))
+        if img.width then f:write(string.format("      width = %d,\n", img.width)) end
+        if img.height then f:write(string.format("      height = %d,\n", img.height)) end
+        f:write("    },\n")
+    end
+    f:write("  }\n")
+    f:write("}\n")
+    f:close()
+end
+
+function Illustrations:loadManifest()
+    local path = self:getManifestPath()
+    if not path or not lfs.attributes(path) then return nil end
+    
+    local f, err = loadfile(path)
+    if not f then return nil end
+    
+    -- Safe environment
+    local env = {}
+    setfenv(f, env)
+    local status, res = pcall(f)
+    if status then return res end
+    return nil
+end
+
 function Illustrations:addToFavorites(source)
     local favorites_dir = self:getFavoritesPath()
     if not favorites_dir then return end
@@ -997,154 +1070,206 @@ function Illustrations:findAndDisplayImages(is_gallery_mode)
     local illustrations_root, output_dir = self:getCachePaths()
     if not output_dir then return end
 
-    -- Show info message
+    local illustrations_root, storage_dir = self:getCachePaths()
+    if not storage_dir then return end
+
+    -- 1. Try Load Manifest
+    local manifest = self:loadManifest()
+    
+    -- If valid manifest exists, JUST DISPLAY and return
+    if manifest and manifest.completed then
+        self:displayImages(manifest.images, is_gallery_mode, max_page)
+        return
+    end
+
+    -- 2. Full Scan Required
+    -- If we are here, it means either:
+    -- a) It's a fresh book
+    -- b) It's an old cache without manifest (Legacy)
+    -- In both cases, we MUST scan and generate the manifest.
+    
+    if not lfs.attributes(storage_dir) then lfs.mkdir(storage_dir) end
+
     local loading = InfoMessage:new{
-        text = _("Scanning book for images..."),
+        text = _("First time setup: Scanning & Extracting..."),
     }
     UIManager:show(loading)
     UIManager:forceRePaint()
 
-    -- Async scanning using coroutine
     local co = coroutine.create(function()
-        local all_images = {}
-        local processed = 0
+        local final_images = {}
+        local ext = doc.file:lower():match("%.([^%.]+)$")
+        local is_cbz = (ext == "cbz")
 
-        local total_pages = doc:getPageCount()
-        
-        for page = 1, total_pages do
-            -- Optimization: If we are in spoiler-free mode, we CAN stop scanning after max_page
-            if max_page and page > max_page then
-                break
-            end
+        if is_cbz then
+            -- === CBZ STRATEGY: UNZIP ALL -> SORT -> MAP ===
             
-            local page_images = self:getImagesFromPage(page)
-            if page_images then
-                for _, img in ipairs(page_images) do
-                    table.insert(all_images, img)
+            -- 1. Unzip All
+            local cmd = string.format("unzip -j -o -q '%s' ", doc.file)
+            cmd = cmd .. "'*.jpg' '*.jpeg' '*.png' '*.gif' '*.svg' '*.webp' -d '" .. storage_dir .. "'"
+            os.execute(cmd)
+            
+            -- 2. List & Sort
+            local files = {}
+            for file in lfs.dir(storage_dir) do
+                if file ~= "." and file ~= ".." and file ~= "cache_manifest.lua" then
+                     table.insert(files, file)
                 end
             end
             
-            processed = processed + 1
-            if processed % 10 == 0 then
-                coroutine.yield()
+            -- Natural Sort Helper
+            table.sort(files, function(a, b)
+                -- Extract numbers for comparison
+                local function padnum(n) return string.format("%05d", n) end
+                local na = a:gsub("%d+", padnum)
+                local nb = b:gsub("%d+", padnum)
+                return na < nb
+            end)
+            
+            -- 3. Map to Manifest
+            for i, filename in ipairs(files) do
+                local full_path = storage_dir .. filename
+                table.insert(final_images, {
+                    path = full_path,
+                    page = i, -- Assume sequential page mapping
+                    valid = true, -- Always valid for comics
+                    width = 0, -- Skip measurement
+                    height = 0
+                })
+            end
+
+        else
+            -- === EPUB/FB2 STRATEGY: PAGE SCAN -> EXTRACT -> VALIDATE ===
+            
+            local all_images = {}
+            local processed = 0
+            local total_pages = doc:getPageCount()
+            
+            -- SCAN ALL PAGES (map structure)
+            for page = 1, total_pages do
+                local page_images = self:getImagesFromPage(page)
+                if page_images then
+                    for _, img in ipairs(page_images) do
+                        table.insert(all_images, img)
+                    end
+                end
+                
+                processed = processed + 1
+                if processed % 20 == 0 then coroutine.yield() end
+            end
+            
+            -- BULK EXTRACT
+            if #all_images > 0 then
+                -- 1. Unzip All
+                local cmd = string.format("unzip -j -o -q '%s' ", doc.file)
+                cmd = cmd .. "'*.jpg' '*.jpeg' '*.png' '*.gif' '*.svg' '*.webp' -d '" .. storage_dir .. "'"
+                os.execute(cmd)
+                
+                -- 2. Process & Validate Metadata
+                local min_size = G_reader_settings:readSetting("illustrations_min_size") or 300
+                local seen_paths = {}
+    
+                for _, img in ipairs(all_images) do
+                     local clean_src = img.src:gsub("%.%./", ""):gsub("^/", "")
+                     local basename = clean_src:match("^.+/(.+)$") or clean_src
+                     local full_path = storage_dir .. basename
+                     
+                     if not seen_paths[full_path] then
+                         seen_paths[full_path] = true
+                         
+                         local valid = false
+                         local w, h = 0, 0
+                         
+                         if lfs.attributes(full_path) then
+                             w, h = self:getImageDimensions(full_path)
+                             if math.min(w, h) >= min_size then
+                                 valid = true
+                             else
+                                 -- Delete invalid to save space
+                                 os.remove(full_path)
+                             end
+                         end
+                         
+                         table.insert(final_images, {
+                             path = full_path,
+                             page = img.page,
+                             valid = valid,
+                             width = w,
+                             height = h
+                         })
+                     end
+                     
+                     if processed % 10 == 0 then coroutine.yield() end
+                end
             end
         end
         
-        -- Schedule UI update
+        -- SAVE MANIFEST
+        local new_manifest = {
+            version = 1,
+            completed = true,
+            images = final_images
+        }
+        self:saveManifest(new_manifest)
+        
         UIManager:scheduleIn(0, function()
             UIManager:close(loading)
-
-            if #all_images == 0 then
-                UIManager:show(InfoMessage:new{
-                    text = _("No images found."),
-                    timeout = 2,
-                })
-            else
-                self:displayImages(all_images, is_gallery_mode, max_page)
-            end
+            self:displayImages(final_images, is_gallery_mode, max_page)
         end)
     end)
 
-    -- Scheduler to resume coroutine
+    
+    -- Scheduler
     local function resume()
         if coroutine.status(co) ~= "dead" then
             local ok, err = coroutine.resume(co)
             if not ok then
-                logger.warn("Illustrations: Error in scanning coroutine: " .. tostring(err))
+                logger.warn("Illustrations: Error scan: " .. tostring(err))
                 UIManager:close(loading)
             else
                 UIManager:scheduleIn(0.01, resume)
             end
         end
     end
-
     resume()
 end
 
 function Illustrations:displayImages(images, is_gallery_mode, max_page, is_favorites)
     local extracted_images = {}
-    local seen_paths = {}
-    local doc = self.ui.document
-
+    
     if is_favorites then
-        -- Direct path usage for favorites
+        -- Favorites are always valid paths
         for _, img in ipairs(images) do
-            local full_path = img.path
-            if lfs.attributes(full_path) then
-                table.insert(extracted_images, { path = full_path, page = 0 })
-            end
+             -- Compatibility map
+             table.insert(extracted_images, { path = img.path, page = img.page or 0 })
         end
     else
-        -- Normal extraction logic
-        local illustrations_root, storage_dir = self:getCachePaths()
-        -- Create directories
-        if not lfs.attributes(illustrations_root) then lfs.mkdir(illustrations_root) end
-        if not lfs.attributes(storage_dir) then lfs.mkdir(storage_dir) end
-        
-        local doc_path = doc.file
+        -- Manifest Mode
+        -- 'images' is the manifest.images list
+        local allow_spoilers = G_reader_settings:readSetting("illustrations_allow_spoilers")
         
         for _, img in ipairs(images) do
-            -- Filter by max_page if set
-            if not max_page or img.page <= max_page then
-                local clean_src = img.src:gsub("%.%./", ""):gsub("^/", "")
-                local basename = clean_src:match("^.+/(.+)$") or clean_src
-                local full_path = storage_dir .. basename
+            if img.valid then
+                -- Spoiler Check
+                -- If max_page is set (from findAndDisplayImages passing it), we respect it.
+                -- Or check global allow_spoilers logic if logical cohesion requires it here.
+                -- Actually, findAndDisplayImages calculates max_page based on allow_spoilers.
                 
-                -- Skip if we already have this image in the list
-                if not seen_paths[full_path] then
-                    -- Check if already exists on disk or extract
-                    if not lfs.attributes(full_path) then
-                        -- Extract if missing
-                        local data = nil
-                        
-                        -- Strategy 1: getDocumentFileContent
-                        if doc.getDocumentFileContent then
-                            local prefixes = {"", "OPS/", "OEBPS/", "EPUB/", "images/"}
-                            for _, prefix in ipairs(prefixes) do
-                                local try_path = prefix .. clean_src
-                                if prefix == "" then try_path = clean_src end
-                                
-                                data = doc:getDocumentFileContent(try_path)
-                                if data then break end
-                            end
-                        end
-                        
-                        if data then
-                            local f = io.open(full_path, "wb")
-                            if f then
-                                f:write(data)
-                                f:close()
-                            end
-                        else
-                            -- Strategy 2: Unzip
-                            -- Quote paths for safety
-                            local cmd = string.format("unzip -j -o -q '%s' '*%s' -d '%s'", doc_path, clean_src, storage_dir)
-                            os.execute(cmd)
-                        end
-                    end
-    
-                    -- Now check if file exists and verify size
-                    if lfs.attributes(full_path) then
-                        local min_size = G_reader_settings:readSetting("illustrations_min_size") or 300
-                        local w, h = self:getImageDimensions(full_path)
-                        
-                        -- Filter: smallest side must be >= min_size
-                        if math.min(w, h) >= min_size then
-                            table.insert(extracted_images, { path = full_path, page = img.page })
-                            seen_paths[full_path] = true
-                        else
-                            -- Delete (optional, but cleaner cache)
-                            os.remove(full_path)
-                        end
-                    end
+                local visible = true
+                if max_page and img.page > max_page then
+                    visible = false
+                end
+                
+                if visible then
+                    table.insert(extracted_images, { path = img.path, page = img.page })
                 end
             end
         end
     end
 
     if #extracted_images == 0 then
-            UIManager:show(InfoMessage:new{
-            text = _("No images found.\n(Check 'Min Image Size' setting or Favorites)"),
+        UIManager:show(InfoMessage:new{
+            text = _("No images found."),
         })
         return
     end

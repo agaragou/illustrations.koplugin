@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5] - 2025-12-14 - Gallery Overhaul & CBZ Support
+
+### Added
+- **Comic Book Support**: Added support for `.cbz` archives (extracts and sorts images automatically).
+
+### Changed
+- **Gallery**: Completely rewritten gallery engine with pagination support. Now opens instantly even with 200+ images and handles large collections smoothly.
+- **Gesture Menus**: Fixed actions ("Show Gallery", "Show Illustrations") to be reliably visible in the General gesture menu.
+
 ## [0.4] - 2025-12-09
 
 ### Added
