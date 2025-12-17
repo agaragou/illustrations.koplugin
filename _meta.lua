@@ -1,5 +1,5 @@
 return {
     name = "Illustrations",
     description = "View all illustrations in the book.",
-    version = "0.5",
+    version = "0.5.1",
 }

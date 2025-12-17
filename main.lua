@@ -597,13 +597,43 @@ function Illustrations:checkUpdate()
             remote_version = body:match("version%s*=%s*([%d%.]+)")
         end
         
-        if remote_version and self:compareVersions(remote_version, current_version) > 0 then
-            UIManager:show(InfoMessage:new{
-                text = "Illustrations plugin\n" .. _("New version available: ") .. remote_version .. "\n" .. _("Current: ") .. current_version,
-                timeout = 5,
-            })
+        if remote_version then
+            self.remote_version = remote_version -- Store for About dialog
+            
+            if self:compareVersions(remote_version, current_version) > 0 then
+                UIManager:show(InfoMessage:new{
+                    text = "Illustrations plugin\n" .. _("New version available: ") .. remote_version .. "\n" .. _("Current: ") .. current_version,
+                    timeout = 5,
+                })
+            end
         end
     end
+end
+
+function Illustrations:onShowAbout()
+    local current_version = self:getLocalVersion() or "?.?"
+    local ver_status = "(latest)"
+    
+    if self.remote_version then
+        if self:compareVersions(self.remote_version, current_version) > 0 then
+            ver_status = "(v" .. self.remote_version .. " available!)"
+        end
+    end
+    
+    local settings_path = DataStorage:getSettingsDir() .. "/settings.reader.lua"
+    local icons_root = self:getCachePaths() -- This is illustrations root
+    
+    local text = string.format("Illustrations plugin v%s %s\n\n", current_version, ver_status)
+    text = text .. "Official repository:\nhttps://github.com/agaragou/illustrations.koplugin\n\n"
+    text = text .. _("Settings stored in:") .. "\n" .. settings_path .. "\n\n"
+    text = text .. _("Cache stored in:") .. "\n" .. icons_root
+    
+    UIManager:show(InfoMessage:new{
+        text = text,
+        timeout = nil, -- Stay until tapped
+        show_icon = true,
+        icon = "info",
+    })
 end
 
 function Illustrations:compareVersions(v1, v2)
@@ -654,6 +684,13 @@ function Illustrations:addToMainMenu(menu_items)
         text = _("Clear Favorites"),
         callback = function()
             self:clearFavorites()
+        end,
+    })
+    
+    table.insert(settings_items, {
+        text = _("About"),
+        callback = function()
+            self:onShowAbout()
         end,
     })
     
@@ -812,6 +849,12 @@ function Illustrations:getCachePaths()
     if cache_dir == settings_dir then cache_dir = settings_dir .. "/../cache" end
     
     local illustrations_root = cache_dir .. "/illustrations"
+    
+    -- IMPORTANT: Create the root folder if it doesn't exist
+    if not lfs.attributes(illustrations_root) then
+        lfs.mkdir(illustrations_root)
+    end
+    
     local book_dir = nil
     
     if doc then
@@ -949,11 +992,12 @@ function Illustrations:clearBookCache(silent)
         if silent then
             do_clear()
         else
-            UIManager:show(ConfirmBox:new{
-                text = _("Are you sure you want to delete the cache for this book?"),
-                ok_text = _("Delete"),
-                cancel_text = _("Cancel"),
-                ok_callback = do_clear
+            local text = _("Are you sure you want to delete the cache for this book?")
+            UIManager:show(InfoMessage:new{
+                text = text,
+                timeout = nil, -- Stay until tapped
+                show_icon = true,
+                icon = "info",
             })
         end
     end

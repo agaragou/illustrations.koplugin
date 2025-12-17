@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2025-12-17 - Critical Cache Fix & About Dialog
+
+### Fixed
+- **Critical**: Fixed "No images found" error on fresh install due to missing cache directory creation.
+### Added
+- **About**: Added "About" dialog in Settings showing version info and paths.
+
 ## [0.5] - 2025-12-14 - Gallery Overhaul & CBZ Support
 
 ### Added
