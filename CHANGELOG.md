@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2] - 2026-04-24 - Critical Memory Leak & Disable Fixes
+
+### Fixed
+- **Critical Memory Leak**: Fixed an issue where images were not properly released from memory during pagination and gallery viewing, causing "high memory usage" warnings and crashes on low-RAM devices.
+- **Plugin Management**: Fixed a bug where the plugin could not be disabled in KOReader settings (KOReader would restart but the plugin would remain enabled) due to an ID casing mismatch.
+
 ## [0.5.1] - 2025-12-17 - Critical Cache Fix & About Dialog
 
 ### Fixed

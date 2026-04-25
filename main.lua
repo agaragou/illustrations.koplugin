@@ -147,6 +147,11 @@ function GalleryWindow:setImage(path, page, index)
     self.page = page
     self.index = index
         
+    -- Free old image to prevent memory leak
+    if self.image and self.image.free then
+        self.image:free()
+    end
+        
     -- ImageWidget doesn't support dynamic updates, so we replace it
     local new_image = ImageWidget:new{
         file = path,
@@ -182,6 +187,12 @@ end
 function GalleryWindow:onClose()
     if self.callback_close then self.callback_close(true) end
     return true
+end
+
+function GalleryWindow:onCloseWidget()
+    if self.image and self.image.free then
+        self.image:free()
+    end
 end
 
 -- Touch Event Handlers
@@ -453,6 +464,11 @@ function ThumbnailWindow:refreshGrid()
         self.grid_v_group,
     }
     
+    -- Free old scroll container to prevent memory leaks from ImageWidgets
+    if self.scroll_container and self.scroll_container.free then
+        self.scroll_container:free()
+    end
+    
     -- Replace in Root Group
     self.scroll_container = new_scroll
     self.cropping_widget = new_scroll
@@ -489,6 +505,12 @@ function ThumbnailWindow:onClose()
     if self.callback_close then self.callback_close() end
     UIManager:close(self)
     return true
+end
+
+function ThumbnailWindow:onCloseWidget()
+    if self.scroll_container and self.scroll_container.free then
+        self.scroll_container:free()
+    end
 end
 
 -- Key events for closing
